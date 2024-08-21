@@ -31,7 +31,7 @@ cur.execute(
     r"AND TPL.ITEMPR_ID = EMP.ID "
     r"AND TFUN.NOME NOT LIKE ('%AVILA%') AND TFUN.NOME NOT LIKE ('%PANA%') "
     r"AND TMAQ.DESCRICAO IN ('CALANDRA','DOBRADEIRA', 'FICEP', 'FURADEIRA','GUILHOTINA','JATO','LIXADEIRA','METALEIRA', 'MIG', 'PARAFUSADEIRA', 'PISTOLA', 'PLASMA', 'PRENSA', 'PUNCIONADEIRA', 'SERRA-FITA', 'TANQUE', 'TORNO')   "
-    r"AND TMOV.DT_APONT BETWEEN TO_DATE ('01/01/2023', 'DD/MM/YYYY') AND TO_DATE (SYSDATE) "
+    r"AND TMOV.DT_APONT BETWEEN TO_DATE('01/01/' || EXTRACT(YEAR FROM SYSDATE), 'DD/MM/YYYY') AND SYSDATE "
     r"GROUP BY TMOV.TEMPO,TOR.NUM_ORDEM, TOR.QTDE, TMAQ.DESCRICAO, TOP.DESCRICAO, TFUN.NOME, EXTRACT(MONTH FROM TMOV.DT_APONT) "
 )
 df = cur.fetchall()
@@ -107,7 +107,8 @@ def operacao(available_options):
     Output('graph', 'figure'),
     Input('dropoperacao', 'value'),
     Input('dropmaquina', 'value'),
-    Input('meu_slider', 'value'))
+    Input('meu_slider', 'value')
+)
 def update_grpah(selected_counties, selected_state, mes):
     if len(selected_counties) == 0:
         return dash.no_update
@@ -174,4 +175,5 @@ def update_table(maq, op, mes):
 
 
 if __name__ == '__main__':
+    app.debug = True
     app.run(host='10.40.3.48', port=8060)
