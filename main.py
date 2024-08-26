@@ -3,12 +3,19 @@ from dash import dcc, html, Output, Input, dash_table, dash
 import cx_Oracle
 import pandas as pd
 from datetime import datetime
+import pyodbc
 
 dsn = cx_Oracle.makedsn("10.40.3.10", 1521, service_name="f3ipro")
 connection = cx_Oracle.connect(user=r"focco_consulta", password=r'consulta3i08', dsn=dsn, encoding="UTF-8")
 cur = connection.cursor()
 cur.execute(
-    r"SELECT  TMOV.TEMPO,TOR.NUM_ORDEM, TOR.QTDE, SUM(ENG.PESO_LIQ * TMOV.QUANTIDADE), TMAQ.DESCRICAO, TOP.DESCRICAO, TFUN.NOME, EXTRACT(MONTH FROM TMOV.DT_APONT) "
+    r"SELECT  TMOV.TEMPO,TOR.NUM_ORDEM, "
+    r"TOR.QTDE, SUM(ENG.PESO_LIQ * TMOV.QUANTIDADE), "
+    r"TMAQ.DESCRICAO, "
+    r"TOP.DESCRICAO, "
+    r"TFUN.NOME, "
+    r"EXTRACT(MONTH FROM TMOV.DT_APONT), "
+    r"TPL.COD_ITEM "
     r"FROM FOCCO3I.TORDENS_MOVTO TMOV "
     r",FOCCO3I.TFUNCIONARIOS TFUN "
     r",FOCCO3I.TORDENS_ROT TROT "
@@ -32,15 +39,45 @@ cur.execute(
     r"AND TFUN.NOME NOT LIKE ('%AVILA%') AND TFUN.NOME NOT LIKE ('%PANA%') "
     r"AND TMAQ.DESCRICAO IN ('CALANDRA','DOBRADEIRA', 'FICEP', 'FURADEIRA','GUILHOTINA','JATO','LIXADEIRA','METALEIRA', 'MIG', 'PARAFUSADEIRA', 'PISTOLA', 'PLASMA', 'PRENSA', 'PUNCIONADEIRA', 'SERRA-FITA', 'TANQUE', 'TORNO')   "
     r"AND TMOV.DT_APONT BETWEEN TO_DATE('01/01/' || EXTRACT(YEAR FROM SYSDATE), 'DD/MM/YYYY') AND SYSDATE "
-    r"GROUP BY TMOV.TEMPO,TOR.NUM_ORDEM, TOR.QTDE, TMAQ.DESCRICAO, TOP.DESCRICAO, TFUN.NOME, EXTRACT(MONTH FROM TMOV.DT_APONT) "
+    r"GROUP BY TMOV.TEMPO,TOR.NUM_ORDEM, TOR.QTDE, TMAQ.DESCRICAO, TOP.DESCRICAO, TFUN.NOME, EXTRACT(MONTH FROM TMOV.DT_APONT), TPL.COD_ITEM "
 )
 df = cur.fetchall()
-df = pd.DataFrame(df, columns=['TEMPO', 'NUM_ORDEM', 'QTDE', 'PESO', 'MAQUINA', 'OPERACAO', 'FUNC', 'DT_APONT'])
+df = pd.DataFrame(df, columns=['TEMPO', 'NUM_ORDEM', 'QTDE', 'PESO', 'MAQUINA', 'OPERACAO', 'FUNC', 'DT_APONT', 'COD_ITEM'])
+
+
+conn = pyodbc.connect("Driver={SQL Server Native Client 11.0};"
+                      "Server=ALFA\\SQLEXPRESS;"
+                      "Database=ReaData;"
+                      "UID=PCPUser;"
+                      "PWD=*$rUserPcP;")
+cursor = conn.cursor()
+
+cursor.execute(
+    r"SELECT  "
+    r"TIT.COD_ITEM, "
+    r"SUM(SOL.QTDE * SOL.COMPRIMENTO) AS COMP "
+    r"FROM [BasePCP].[dbo].TTIPOS_ITENS_ SOL "
+    r"INNER JOIN [BasePCP].[dbo].TITENS TIT		ON TIT.ID = SOL.TITENS_ID "
+    r"GROUP BY TIT.COD_ITEM "
+)
+df_solda = pd.DataFrame.from_records(cursor.fetchall(), columns=['COD_ITEM', 'COMPRIMENTO'])
+cursor.close()
+conn.close()
+
+df_solda['COD_ITEM'] = df_solda['COD_ITEM'].astype(str)
+
+df = pd.merge(df, df_solda, on='COD_ITEM', how='left')
+
+
 df = df.groupby(['MAQUINA', 'FUNC', 'OPERACAO', 'DT_APONT']).agg(
-    {'TEMPO': ['sum'], 'NUM_ORDEM': ['count'], 'PESO': ['sum'], 'QTDE': ['sum']})
-df.columns = ['TEMPO', 'NUM_ORDEM', 'PESO', 'QTDE']
+    {'TEMPO': ['sum'], 'NUM_ORDEM': ['count'], 'PESO': ['sum'], 'QTDE': ['sum'], 'COMPRIMENTO': ['sum']})
+df.columns = ['TEMPO', 'NUM_ORDEM', 'PESO', 'QTDE', 'COMPRIMENTO']
 df['TEMPO'] = df['TEMPO'] / 60
+df['COMPRIMENTO'] = df['COMPRIMENTO'] / 1000
+df['PESO'] = df['PESO'] / 1000
 df = df.reset_index().round(2)
+
+
 
 currentMonth = datetime.now().month
 app = dash.Dash(__name__)
@@ -51,7 +88,7 @@ app.layout = html.Div([
     dcc.Dropdown(
         id='dropmaquina',
         options=[{'label': s, 'value': s} for s in sorted(df['MAQUINA'].unique())],
-        value='GUILHOTINA',
+        value='MIG',
         clearable=False
     ),
     html.Hr(),
@@ -74,7 +111,7 @@ app.layout = html.Div([
                                 12: {'label': 'DEZ'},
                                 },
                id='meu_slider',
-               value=currentMonth - 1,
+               value=currentMonth,
                included=False
                ),
 
@@ -118,6 +155,7 @@ def update_grpah(selected_counties, selected_state, mes):
         dff['QPERCENT'] = (dff['QTDE'] / dff['QTDE'].sum()) * 100
         dff['PPERCENT'] = (dff['PESO'] / dff['PESO'].sum()) * 100
         dff['NPERCENT'] = (dff['NUM_ORDEM'] / dff['NUM_ORDEM'].sum()) * 100
+        dff['SPERCENT'] = (dff['COMPRIMENTO'] / dff['COMPRIMENTO'].sum()) * 100
 
         fig = go.Figure(data=[
             go.Bar(name='Ordens',
@@ -126,7 +164,7 @@ def update_grpah(selected_counties, selected_state, mes):
                    text=['{} - {:.0%}'.format(v, p / 100) for v, p in zip(dff['NUM_ORDEM'], dff['NPERCENT'])],
                    orientation='h'
                    ),
-            go.Bar(name='Peso (Kg)',
+            go.Bar(name='Peso (Ton)',
                    y=dff['FUNC'],
                    x=dff['PESO'],
                    text=['{} - {:.0%}'.format(v, p / 100) for v, p in zip(dff['PESO'], dff['PPERCENT'])],
@@ -142,6 +180,12 @@ def update_grpah(selected_counties, selected_state, mes):
                    y=dff['FUNC'],
                    x=dff['TEMPO'],
                    text=['{} - {:.0%}'.format(v, p / 100) for v, p in zip(dff['TEMPO'], dff['TPERCENT'])],
+                   orientation='h'
+                   ),
+            go.Bar(name='Comp. Solda (m)',
+                   y=dff['FUNC'],
+                   x=dff['COMPRIMENTO'],
+                   text=['{} - {:.0%}'.format(v, p / 100) for v, p in zip(dff['TEMPO'], dff['SPERCENT'])],
                    orientation='h'
                    ),
         ])
