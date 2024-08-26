@@ -157,6 +157,7 @@ def update_grpah(selected_counties, selected_state, mes):
         dff['NPERCENT'] = (dff['NUM_ORDEM'] / dff['NUM_ORDEM'].sum()) * 100
         dff['SPERCENT'] = (dff['COMPRIMENTO'] / dff['COMPRIMENTO'].sum()) * 100
 
+
         fig = go.Figure(data=[
             go.Bar(name='Ordens',
                    y=dff['FUNC'],
